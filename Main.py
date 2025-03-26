@@ -1,11 +1,7 @@
-import re  # для работы с регулярными выражениями
-from itertools import count
+import re
 import csv
 from playwright.sync_api import sync_playwright  # для автоматизации браузера
-import json  # для работы с JSON
-import time  # для работы с временными задержками
-
-from unicodedata import category
+import time
 
 class Attribut():
     def __init__(self, category, name, value):
@@ -15,7 +11,7 @@ class Attribut():
 
 class Car:
     def __init__(self, main_category="None", category="None", name="None", model="None",
-                 price="None", image="None", images=None, attributes=None):
+                 price=0, image="None", images=None, attributes=None):
         self._MAIN_CATEGORY_ = main_category
         self._CATEGORY_ = category
         self._NAME_ = name
@@ -37,7 +33,6 @@ class Car:
             "\n=== Дополнительные изображения ==="
         ]
 
-        # Добавляем изображения
         if not self._IMAGES_:
             info.append("  Нет дополнительных изображений")
         else:
@@ -46,14 +41,12 @@ class Car:
 
         info.append("\n=== Атрибуты ===")
 
-        # Добавляем атрибуты
         if not self._ATTRIBUTES_:
             info.append("  Нет атрибутов")
         else:
             for attr in self._ATTRIBUTES_:
                 info.append(f"  [{attr.category}] {attr.name}: {attr.value}")
 
-        # Выводим всю информацию
         print('\n'.join(info))
 
 
@@ -64,69 +57,73 @@ class Parser():
         self._BaseUrl = baseUrl
         self.cars = []
 
-    def write_cars_to_csv(cars, filename):
+    def write_cars_to_csv(self, filename):
         with open(filename, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
+            writer = csv.writer(file, delimiter=';')
 
-            # Записываем заголовки
-            headers = [
+            writer.writerow([
                 "_MAIN_CATEGORY_",
                 "_CATEGORY_",
                 "_NAME_",
                 "_MODEL_",
                 "_PRICE_",
                 "_IMAGE_",
-                "_IMAGES_",  # Список изображений будет объединён в строку
-                "_ATTRIBUTES_"  # Атрибуты будут сериализованы
-            ]
-            writer.writerow(headers)
+                "_IMAGES_",
+                "_ATTRIBUTES_"
+            ])
 
-            # Записываем каждую машину
-            for car in cars:
-                # Сериализуем список изображений в строку (например, через разделитель '|')
-                images_str = ";".join(car._IMAGES_)
+    def append_cars_to_csv(self, filename):
+        with open(filename, mode='a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file, delimiter=';')
 
-                # Сериализуем атрибуты в строку (например, в формате "категория:название:значение")
+            for car in self.cars:
                 attributes_str = "\n".join(
-                    f"{attr.category}|{attr.name}:{attr.value}"
+                    f"{attr.category}|{attr.name}|{attr.value}"
                     for attr in car._ATTRIBUTES_
                 )
+                additional_images = ",".join(car._IMAGES_)
 
-                # Формируем строку CSV
-                row = [
+                writer.writerow([
                     car._MAIN_CATEGORY_,
                     car._CATEGORY_,
                     car._NAME_,
                     car._MODEL_,
                     car._PRICE_,
                     car._IMAGE_,
-                    images_str,
-                    attributes_str,
-                ]
-                writer.writerow(row)
+                    additional_images,
+                    attributes_str
+                ])
 
     def navigate_to_car(self, car_element):
         link = car_element.query_selector("a.text-decoration-none.btn")
-        with self.page.expect_navigation():
-            href = link.get_attribute("href")
-            print(f"Найдена ссылка: {href}")
-            link.click()
-            self.parse_car()
+        href = link.get_attribute("href")
+        print(f"Найдена ссылка: {href}")
 
-    def extract_uid(self, url):
-        match = re.search(r'uid-(\d+)', url)
+        with self.page.context.expect_page() as new_page_info:
+            link.click(button="middle")
+
+        self.car_page = new_page_info.value
+
+        self.car_page.wait_for_load_state()
+
+        self.parse_car()
+
+        self.car_page.close()
+
+    def extract_uid(self):
+        match = re.search(r'uid-(\d+)', self.car_page.url)
         if match:
             return match.group(1)
         return "None"
 
     def extrat_price(self):
-        price_text = self.page.locator('[itemprop="price"]').inner_text()
-        clean_price = price_text.replace('&nbsp;', '').replace(' ', '')
+        price_text = self.car_page.locator('[itemprop="price"]').inner_text()
+        clean_price = re.sub(r'[^\d,.]', '', price_text)
         # чуть позже заметил, что id есть и в html, решил пока не изменять
-        return clean_price
+        return int(clean_price)
 
     def extrat_images(self):
-        list_image = self.page.query_selector_all('img.w-100.rounded.img-fluid.swiper-car-view')
+        list_image = self.car_page.query_selector_all('img.w-100.rounded.img-fluid.swiper-car-view')
 
         list_src = []
         for img in list_image:
@@ -134,83 +131,86 @@ class Parser():
 
         return list_src
 
-    def extrar_attributs_tech_spec(self):
-        names = self.page.query_selector_all("div.col-6.text-secondary")
-        values = self.page.query_selector_all("div.col-6")
+    def extract_attributes_tech_spec(self):
+        names = self.car_page.query_selector_all("div.col-6.text-secondary")
+        values = self.car_page.query_selector_all("div.col-6:not(.text-secondary)")
 
-        list_Attribut = []
+        list_attribut = []
+
         for name, value in zip(names, values):
-            list_Attribut.append(Attribut("Общие", name.text_content(), value.text_content()))
+            name_text = name.text_content().strip()
+            value_text = value.text_content().strip()
 
-        return list_Attribut[0:(len(list_Attribut) - 2)]
+            if name_text and value_text:
+                list_attribut.append(Attribut("Общие", name_text, value_text))
 
-    # def check_option(self, name):
-    #     has_close_icon = name.query_selector('i.fa.fa-close').count() > 0
-    #     return not has_close_icon
-    #
-    # def extrar_attributs_Options(self):
-    #     names = self.page.query_selector_all("ms-2 text-secondary")
-    #
-    #     list_Attribut = []
-    #     for name in names:
-    #         list_Attribut.append(Attribut("Общие", name.text_content(), self.check_option(name)))
-    #
-    #     return list_Attribut
+        return list_attribut[:-1] if len(list_attribut) > 2 else list_attribut
 
-    def extrar_attributs_Options(self):
-        names_true = self.page.query_selector_all("span.ms-2")
-        names_false = self.page.query_selector_all("span.ms-2.text-secondary")
+    def extract_attributes_options(self):
+        all_options = self.car_page.query_selector_all("span.ms-2:not(.fs-6)")
 
-        list_Attribut = []
-        for name_true in names_true:
-            list_Attribut.append(Attribut("Общие", name_true.text_content(), "Есть"))
+        list_attribut = []
 
-        for name_false in names_false:
-            list_Attribut.append(Attribut("Общие", name_false.text_content(), "Нет"))
+        for option in all_options:
+            is_available = "text-secondary" not in option.get_attribute("class")
+            option_text = option.text_content().strip()
 
-        return list_Attribut
+            if option_text:
+                status = "Есть" if is_available else "Нет"
+                list_attribut.append(Attribut("Опции", option_text, status))
+
+        return list_attribut
 
     def extrar_attributs(self):
-        list_attribut = self.extrar_attributs_tech_spec()
-        list_attribut.extend(self.extrar_attributs_Options())
+        list_attribut = self.extract_attributes_tech_spec()
+        list_attribut.extend(self.extract_attributes_options())
 
         return  list_attribut
 
     def parse_car(self):
-        category = self.page.query_selector_all("li.breadcrumb-item")[1].query_selector("span").text_content()
-        name = self.page.query_selector("h1.mb-0").inner_text()
-        model = self.extract_uid(self.page.url)
+        category = self.car_page.query_selector_all("li.breadcrumb-item")[1].query_selector("span").text_content()
+        name = self.car_page.query_selector("h1.mb-0").inner_text()
+        model = self.extract_uid()
         price = self.extrat_price()
         images = self.extrat_images()
         atributs = self.extrar_attributs()
 
-        self.cars.append(Car(category, category, name, model, price, images[0], images[1:], atributs))
-        self.page.go_back()
+        car = Car(category, category, name, model, price, images[0], images[1:], atributs)
+        #car.display_info()
 
-    def convertToCar(self):
-        ...
+        self.cars.append(car)
 
     def parse(self):
-        # Запускаем Playwright в синхронном режиме
         with sync_playwright() as p:
-            # Запускаем браузер Chromium в режиме с отображением (headless=False)
             browser = p.chromium.launch(headless=False)
-            self.page = browser.new_page()  # Создаем новую страницу
-            self.page.goto(self._BaseUrl)  # Переходим на сайт
+            self.page = browser.new_page()
+            self.page.goto(self._BaseUrl)
 
-            self.page.wait_for_selector("div.row.row-cols-1")
+            self.write_cars_to_csv("cars.csv")
 
-            list_car = self.page.query_selector_all("div.card.car-height")
+            while True:
+                self.page.wait_for_selector("div.row.row-cols-1")
+                list_car = self.page.query_selector_all("div.card.car-height")
 
-            for car in list_car:
-                self.navigate_to_car(car)
-                break
+                for i, car in enumerate(list_car, 1):
+                    self.navigate_to_car(car)
+                    time.sleep(1)
 
-            self.cars[0].display_info()
+                self.append_cars_to_csv("cars.csv")
 
-            time.sleep(10)
-            browser.close()  # Закрываем браузер
+                self.cars = []
 
-parser = Parser("https://carskorea.shop/?fbclid=IwY2xjawJQ59xleHRuA2FlbQIxMAABHa-eoVAdnFCp_LmrOG1l_giz9YUibfIygC-VInsGjkgYr83mcEbRBxwHqQ_aem_DqRwVuO5PhySKu4j7WYPUg")
+                try:
+                    self.page.click('i.fa-solid.fa-angles-right')
+                except:
+                    break
+
+
+
+            browser.close()
+
+
+
+parser = Parser("https://carskorea.shop/dodge/1/")
 
 parser.parse()
