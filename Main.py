@@ -22,6 +22,7 @@ class Car:
         self._ATTRIBUTES_ = attributes if attributes is not None else []
 
     def display_info(self):
+        """Отображает информацию о машине"""
         info = [
             "=== Информация об автомобиле ===",
             f"Основная категория: {self._MAIN_CATEGORY_}",
@@ -58,6 +59,7 @@ class Parser():
         self.cars = []
 
     def write_cars_to_csv(self, filename):
+        """Создание пустой таблицы .csv"""
         with open(filename, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file, delimiter=';')
 
@@ -73,6 +75,7 @@ class Parser():
             ])
 
     def append_cars_to_csv(self, filename):
+        """Запись автомобилей в .csv"""
         with open(filename, mode='a', newline='', encoding='utf-8') as file:
             writer = csv.writer(file, delimiter=';')
 
@@ -95,6 +98,8 @@ class Parser():
                 ])
 
     def navigate_to_car(self, car_element):
+        """Переходит на страницу автомобиля из элемента списка, открывая её в новой вкладке.
+    После загрузки страницы запускает парсинг и закрывает вкладку."""
         link = car_element.query_selector("a.text-decoration-none.btn")
         href = link.get_attribute("href")
         print(f"Найдена ссылка: {href}")
@@ -111,18 +116,21 @@ class Parser():
         self.car_page.close()
 
     def extract_uid(self):
+        """Извлекает id автомобиля с адреса страницы """
         match = re.search(r'uid-(\d+)', self.car_page.url)
         if match:
             return match.group(1)
         return "None"
 
-    def extrat_price(self):
+    def extract_price(self):
+        """Извлекает цену автомобиля со страницы"""
         price_text = self.car_page.locator('[itemprop="price"]').inner_text()
         clean_price = re.sub(r'[^\d,.]', '', price_text)
         # чуть позже заметил, что id есть и в html, решил пока не изменять
         return int(clean_price)
 
-    def extrat_images(self):
+    def extract_images(self):
+        """Извлекает изображения со страницы"""
         list_image = self.car_page.query_selector_all('img.w-100.rounded.img-fluid.swiper-car-view')
 
         list_src = []
@@ -132,6 +140,7 @@ class Parser():
         return list_src
 
     def extract_attributes_tech_spec(self):
+        """Извлекает технические характеристики автомобиля со страницы"""
         names = self.car_page.query_selector_all("div.col-6.text-secondary")
         values = self.car_page.query_selector_all("div.col-6:not(.text-secondary)")
 
@@ -147,6 +156,7 @@ class Parser():
         return list_attribut[:-1] if len(list_attribut) > 2 else list_attribut
 
     def extract_attributes_options(self):
+        """Извлекает опции автомобиля со страницы"""
         all_options = self.car_page.query_selector_all("span.ms-2:not(.fs-6)")
 
         list_attribut = []
@@ -161,19 +171,21 @@ class Parser():
 
         return list_attribut
 
-    def extrar_attributs(self):
+    def extract_attributs(self):
+        """Извлекает атрибуты автомобиля со страницы"""
         list_attribut = self.extract_attributes_tech_spec()
         list_attribut.extend(self.extract_attributes_options())
 
         return  list_attribut
 
     def parse_car(self):
+        """Извлекает данные автомобиля со страницы"""
         category = self.car_page.query_selector_all("li.breadcrumb-item")[1].query_selector("span").text_content()
         name = self.car_page.query_selector("h1.mb-0").inner_text()
         model = self.extract_uid()
-        price = self.extrat_price()
-        images = self.extrat_images()
-        atributs = self.extrar_attributs()
+        price = self.extract_price()
+        images = self.extract_images()
+        atributs = self.extract_attributs()
 
         car = Car(category, category, name, model, price, images[0], images[1:], atributs)
         #car.display_info()
@@ -208,8 +220,6 @@ class Parser():
 
 
             browser.close()
-
-
 
 parser = Parser("https://carskorea.shop/dodge/1/")
 
