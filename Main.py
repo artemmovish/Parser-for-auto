@@ -1,7 +1,9 @@
 import re
 import csv
-from playwright.sync_api import sync_playwright  # для автоматизации браузера
 import time
+
+from playwright.sync_api import sync_playwright  # для автоматизации браузера
+
 
 class Attribut():
     def __init__(self, category, name, value):
@@ -117,6 +119,7 @@ class Parser():
 
     def extract_uid(self):
         """Извлекает id автомобиля с адреса страницы """
+        # чуть позже заметил, что id есть и в html, решил пока не изменять
         match = re.search(r'uid-(\d+)', self.car_page.url)
         if match:
             return match.group(1)
@@ -126,7 +129,7 @@ class Parser():
         """Извлекает цену автомобиля со страницы"""
         price_text = self.car_page.locator('[itemprop="price"]').inner_text()
         clean_price = re.sub(r'[^\d,.]', '', price_text)
-        # чуть позже заметил, что id есть и в html, решил пока не изменять
+
         return int(clean_price)
 
     def extract_images(self):
@@ -221,6 +224,6 @@ class Parser():
 
             browser.close()
 
-parser = Parser("https://carskorea.shop/dodge/1/")
+parser = Parser("https://carskorea.shop/")
 
 parser.parse()
